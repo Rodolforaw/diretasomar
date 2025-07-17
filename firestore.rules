@@ -1,0 +1,28 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Regras para a coleção de obras
+    match /obras/{obraId} {
+      // Permitir leitura e escrita para todos (você pode restringir conforme necessário)
+      allow read, write: if true;
+      
+      // Exemplo de regra mais restritiva (descomente se quiser usar autenticação):
+      // allow read, write: if request.auth != null;
+      
+      // Validação de dados na criação/atualização
+      allow create, update: if validateObraData();
+    }
+    
+    // Função para validar dados da obra
+    function validateObraData() {
+      let data = request.resource.data;
+      return data.keys().hasAll(['nome', 'endereco', 'latitude', 'longitude', 'status']) &&
+             data.nome is string &&
+             data.endereco is string &&
+             data.latitude is number &&
+             data.longitude is number &&
+             data.status in ['planejada', 'em_andamento', 'concluida', 'pausada'];
+    }
+  }
+}
