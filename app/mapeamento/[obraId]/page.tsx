@@ -420,18 +420,18 @@ export default function MapeamentoPage() {
       const color = layer.options?.color || getColorForType(type)
       
       let coordinates
-      if (layer instanceof L.Polygon && !(layer instanceof L.Rectangle)) {
+      if (layer instanceof (window as any).L.Polygon && !(layer instanceof (window as any).L.Rectangle)) {
         coordinates = layer.getLatLngs()[0].map((latlng: any) => [latlng.lat, latlng.lng])
-      } else if (layer instanceof L.Rectangle) {
+      } else if (layer instanceof (window as any).L.Rectangle) {
         coordinates = layer.getBounds()
-      } else if (layer instanceof L.Circle) {
+      } else if (layer instanceof (window as any).L.Circle) {
         coordinates = {
           center: [layer.getLatLng().lat, layer.getLatLng().lng],
           radius: layer.getRadius()
         }
-      } else if (layer instanceof L.Marker) {
+      } else if (layer instanceof (window as any).L.Marker) {
         coordinates = [layer.getLatLng().lat, layer.getLatLng().lng]
-      } else if (layer instanceof L.Polyline) {
+      } else if (layer instanceof (window as any).L.Polyline) {
         coordinates = layer.getLatLngs().map((latlng: any) => [latlng.lat, latlng.lng])
       }
 
@@ -449,11 +449,11 @@ export default function MapeamentoPage() {
   }
 
   const getTypeFromLayer = (layer: any) => {
-    if (layer instanceof L.Polygon && !(layer instanceof L.Rectangle)) return "polygon"
-    if (layer instanceof L.Rectangle) return "rectangle"
-    if (layer instanceof L.Circle) return "circle"
-    if (layer instanceof L.Marker) return "marker"
-    if (layer instanceof L.Polyline) return "polyline"
+    if (layer instanceof (window as any).L.Polygon && !(layer instanceof (window as any).L.Rectangle)) return "polygon"
+    if (layer instanceof (window as any).L.Rectangle) return "rectangle"
+    if (layer instanceof (window as any).L.Circle) return "circle"
+    if (layer instanceof (window as any).L.Marker) return "marker"
+    if (layer instanceof (window as any).L.Polyline) return "polyline"
     return "unknown"
   }
 
@@ -510,15 +510,19 @@ export default function MapeamentoPage() {
   }
 
   const handleSaveDrawings = async () => {
+    // Atualizar desenhos dos layers primeiro
     updateDrawingsFromLayers()
     
     try {
       if (obra) {
-        await obrasService.update(obra.id, { mapeamento: drawings })
-        toast({
-          title: "Mapeamento salvo!",
-          description: "Os desenhos foram salvos na obra."
-        })
+        // Aguardar um pouco para garantir que os drawings foram atualizados
+        setTimeout(async () => {
+          await obrasService.update(obra.id, { mapeamento: drawings })
+          toast({
+            title: "Mapeamento salvo!",
+            description: "Os desenhos foram salvos na obra."
+          })
+        }, 100)
       }
     } catch (error) {
       toast({
@@ -609,8 +613,8 @@ export default function MapeamentoPage() {
           </div>
         </div>
 
-        {/* Informações da obra flutuante */}
-        <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm px-4 py-3 rounded-lg shadow-lg z-[1000] max-w-sm">
+        {/* Informações da obra flutuante - movida para baixo */}
+        <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-sm px-4 py-3 rounded-lg shadow-lg z-[1000] max-w-sm">
           <h3 className="font-semibold text-sm mb-2">Informações da Obra</h3>
           <div className="space-y-1 text-xs">
             <p><strong>OS:</strong> {obra.os}</p>
