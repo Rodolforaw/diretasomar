@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { MapPin, Loader2, Layers } from "lucide-react"
+import { MapPin, Loader2, Layers, Eye, EyeOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useRouter } from "next/navigation"
 import type { Obra } from "@/types/obra"
@@ -18,9 +18,11 @@ export function MapaObras({ obras, onObraSelect }: MapaObrasProps) {
   const mapInstanceRef = useRef<any>(null)
   const markersRef = useRef<any[]>([])
   const layersRef = useRef<any>({})
+  const drawingsRef = useRef<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [currentLayer, setCurrentLayer] = useState<"street" | "satellite">("street")
+  const [showDrawings, setShowDrawings] = useState(true)
 
   // Função global para mapear obra (será chamada pelo popup)
   useEffect(() => {
@@ -122,6 +124,9 @@ export function MapaObras({ obras, onObraSelect }: MapaObrasProps) {
 
         // Adicionar marcadores das obras
         updateMarkers(L, map)
+        
+        // Adicionar desenhos salvos das obras
+        updateDrawings(L, map)
       } catch (err) {
         console.error("Erro ao inicializar mapa:", err)
         if (mounted) {
@@ -146,15 +151,100 @@ export function MapaObras({ obras, onObraSelect }: MapaObrasProps) {
     if (mapInstanceRef.current) {
       updateMarkersAsync()
     }
-  }, [obras])
+  }, [obras, showDrawings])
 
   const updateMarkersAsync = async () => {
     try {
       const L = await loadLeaflet()
       updateMarkers(L, mapInstanceRef.current)
+      updateDrawings(L, mapInstanceRef.current)
     } catch (err) {
       console.error("Erro ao atualizar marcadores:", err)
     }
+  }
+
+  const updateDrawings = (L: any, map: any) => {
+    // Remover desenhos existentes
+    drawingsRef.current.forEach((drawing) => {
+      map.removeLayer(drawing)
+    })
+    drawingsRef.current = []
+
+    if (!showDrawings) return
+
+    // Adicionar desenhos salvos de cada obra
+    obras.forEach((obra) => {
+      if (!obra.mapeamento || obra.mapeamento.length === 0) return
+
+      obra.mapeamento.forEach((drawing: any) => {
+        let layer: any = null
+
+        switch (drawing.type) {
+          case 'polygon':
+            layer = L.polygon(drawing.coordinates, {
+              color: drawing.color || '#3B82F6',
+              fillColor: drawing.color || '#3B82F6',
+              fillOpacity: 0.3,
+              weight: 2
+            })
+            break
+          case 'rectangle':
+            layer = L.rectangle(drawing.coordinates, {
+              color: drawing.color || '#10B981',
+              fillColor: drawing.color || '#10B981',
+              fillOpacity: 0.3,
+              weight: 2
+            })
+            break
+          case 'circle':
+            layer = L.circle([drawing.coordinates.lat, drawing.coordinates.lng], {
+              radius: drawing.coordinates.radius,
+              color: drawing.color || '#F59E0B',
+              fillColor: drawing.color || '#F59E0B',
+              fillOpacity: 0.3,
+              weight: 2
+            })
+            break
+          case 'marker':
+            layer = L.marker([drawing.coordinates.lat, drawing.coordinates.lng], {
+              icon: L.divIcon({
+                html: `
+                  <div style="
+                    background-color: ${drawing.color || '#EF4444'};
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 50%;
+                    border: 2px solid white;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                  "></div>
+                `,
+                className: "drawing-marker",
+                iconSize: [16, 16],
+                iconAnchor: [8, 8],
+              })
+            })
+            break
+        }
+
+        if (layer) {
+          // Adicionar popup com informações do desenho
+          if (drawing.produto || drawing.observacao) {
+            const popupContent = `
+              <div style="min-width: 200px;">
+                <h4 style="margin: 0 0 8px 0; font-weight: bold;">${drawing.type.toUpperCase()}</h4>
+                ${drawing.produto ? `<p style="margin: 0 0 4px 0;"><strong>Produto:</strong> ${drawing.produto}</p>` : ''}
+                ${drawing.observacao ? `<p style="margin: 0; font-size: 12px; color: #6b7280;">${drawing.observacao}</p>` : ''}
+                <p style="margin: 4px 0 0 0; font-size: 11px; color: #6b7280;">Obra: ${obra.os}</p>
+              </div>
+            `
+            layer.bindPopup(popupContent)
+          }
+
+          layer.addTo(map)
+          drawingsRef.current.push(layer)
+        }
+      })
+    })
   }
 
   const updateMarkers = (L: any, map: any) => {
@@ -250,6 +340,19 @@ export function MapaObras({ obras, onObraSelect }: MapaObrasProps) {
             ">
               ${obra.criticidade}
             </span>
+            ${obra.mapeamento && obra.mapeamento.length > 0 ? `
+              <span style="
+                background-color: #10b981;
+                color: white;
+                padding: 3px 8px;
+                border-radius: 12px;
+                font-size: 11px;
+                font-weight: 500;
+                margin-left: 6px;
+              ">
+                🗺️ Mapeada (${obra.mapeamento.length} elementos)
+              </span>
+            ` : ''}
           </div>
           <div style="margin: 8px 0; font-size: 13px;">
             <div style="margin: 2px 0;"><strong>Distrito:</strong> ${obra.distrito}</div>
@@ -260,7 +363,7 @@ export function MapaObras({ obras, onObraSelect }: MapaObrasProps) {
             <button 
               onclick="window.mapearObra('${obra.id}', '${obra.os}')"
               style="
-                background-color: #3b82f6;
+                background-color: ${obra.mapeamento && obra.mapeamento.length > 0 ? '#10b981' : '#3b82f6'};
                 color: white;
                 border: none;
                 padding: 8px 16px;
@@ -271,10 +374,10 @@ export function MapaObras({ obras, onObraSelect }: MapaObrasProps) {
                 width: 100%;
                 transition: background-color 0.2s;
               "
-              onmouseover="this.style.backgroundColor='#2563eb'"
-              onmouseout="this.style.backgroundColor='#3b82f6'"
+              onmouseover="this.style.backgroundColor='${obra.mapeamento && obra.mapeamento.length > 0 ? '#059669' : '#2563eb'}'"
+              onmouseout="this.style.backgroundColor='${obra.mapeamento && obra.mapeamento.length > 0 ? '#10b981' : '#3b82f6'}'"
             >
-              🗺️ Mapear Obra
+              ${obra.mapeamento && obra.mapeamento.length > 0 ? '🗺️ Ver/Editar Mapeamento' : '🗺️ Mapear Obra'}
             </button>
           </div>
         </div>
@@ -364,10 +467,22 @@ export function MapaObras({ obras, onObraSelect }: MapaObrasProps) {
               <MapPin className="h-5 w-5" />
               Mapa das Obras - Maricá ({obras.length})
             </div>
-            <Button onClick={toggleLayer} variant="outline" size="sm" className="flex items-center gap-2 bg-transparent">
-              <Layers className="h-4 w-4" />
-              {currentLayer === "street" ? "Satélite" : "Mapa"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button 
+                onClick={() => setShowDrawings(!showDrawings)} 
+                variant="outline" 
+                size="sm" 
+                className="flex items-center gap-2 bg-transparent"
+                title={showDrawings ? "Ocultar desenhos" : "Mostrar desenhos"}
+              >
+                {showDrawings ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                Desenhos
+              </Button>
+              <Button onClick={toggleLayer} variant="outline" size="sm" className="flex items-center gap-2 bg-transparent">
+                <Layers className="h-4 w-4" />
+                {currentLayer === "street" ? "Satélite" : "Mapa"}
+              </Button>
+            </div>
           </CardTitle>
           <CardDescription>
             Visualização geográfica das obras em Maricá, RJ -{" "}
@@ -377,23 +492,46 @@ export function MapaObras({ obras, onObraSelect }: MapaObrasProps) {
         <CardContent>
           <div className="space-y-4">
             {/* Legenda */}
-            <div className="flex flex-wrap gap-4 text-sm">
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded-full bg-gray-500 border-2 border-white shadow-sm"></div>
-                <span>Planejada</span>
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-4 text-sm">
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded-full bg-gray-500 border-2 border-white shadow-sm"></div>
+                  <span>Planejada</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded-full bg-blue-500 border-2 border-white shadow-sm"></div>
+                  <span>Em Andamento</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded-full bg-yellow-500 border-2 border-white shadow-sm"></div>
+                  <span>Pausada</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-white shadow-sm"></div>
+                  <span>Concluída</span>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded-full bg-blue-500 border-2 border-white shadow-sm"></div>
-                <span>Em Andamento</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded-full bg-yellow-500 border-2 border-white shadow-sm"></div>
-                <span>Pausada</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-white shadow-sm"></div>
-                <span>Concluída</span>
-              </div>
+              
+              {showDrawings && (
+                <div className="flex flex-wrap gap-4 text-sm border-t pt-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 bg-blue-500 border-2 border-white shadow-sm"></div>
+                    <span>Polígonos</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 bg-green-500 border-2 border-white shadow-sm"></div>
+                    <span>Retângulos</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 bg-yellow-500 border-2 border-white shadow-sm"></div>
+                    <span>Círculos</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 bg-red-500 border-2 border-white shadow-sm"></div>
+                    <span>Marcadores</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Mapa */}
