@@ -69,7 +69,7 @@ export default function RootLayout({
           <SidebarProvider defaultOpen={false}>
             <div className="min-h-screen flex w-full">
               <AppSidebar />
-              <main className="flex-1 flex flex-col min-w-0">{children}</main>
+              <main className="flex-1 flex flex-col min-w-0 overflow-hidden">{children}</main>
             </div>
           </SidebarProvider>
           <Toaster />
