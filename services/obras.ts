@@ -83,7 +83,7 @@ export const obrasService = {
   },
 
   // Atualizar obra
-  async update(id: string, data: Partial<CreateObraData>): Promise<void> {
+  async update(id: string, data: Record<string, any>): Promise<void> {
     const docRef = doc(db, COLLECTION_NAME, id)
     await updateDoc(docRef, {
       ...data,

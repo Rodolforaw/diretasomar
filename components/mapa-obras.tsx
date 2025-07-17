@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { MapPin, Loader2, Layers } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useRouter } from "next/navigation"
 import type { Obra } from "@/types/obra"
 
 interface MapaObrasProps {
@@ -12,6 +13,7 @@ interface MapaObrasProps {
 }
 
 export function MapaObras({ obras, onObraSelect }: MapaObrasProps) {
+  const router = useRouter()
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstanceRef = useRef<any>(null)
   const markersRef = useRef<any[]>([])
@@ -19,6 +21,22 @@ export function MapaObras({ obras, onObraSelect }: MapaObrasProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [currentLayer, setCurrentLayer] = useState<"street" | "satellite">("street")
+
+  // Função global para mapear obra (será chamada pelo popup)
+  useEffect(() => {
+    // @ts-ignore
+    window.mapearObra = (obraId: string, os: string) => {
+      console.log(`Mapeando obra: ${os} (ID: ${obraId})`)
+      
+      // Navegar para a página de mapeamento
+      router.push(`/mapeamento/${obraId}`)
+    }
+
+    return () => {
+      // @ts-ignore
+      delete window.mapearObra
+    }
+  }, [obras, router])
 
   // Função para carregar Leaflet dinamicamente
   const loadLeaflet = async () => {
@@ -238,6 +256,27 @@ export function MapaObras({ obras, onObraSelect }: MapaObrasProps) {
             <div style="margin: 2px 0;"><strong>Progresso:</strong> ${obra.progresso}%</div>
             <div style="margin: 2px 0;"><strong>Responsável:</strong> ${obra.responsavelTecnico?.nome || "Não informado"}</div>
           </div>
+          <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
+            <button 
+              onclick="window.mapearObra('${obra.id}', '${obra.os}')"
+              style="
+                background-color: #3b82f6;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: 500;
+                cursor: pointer;
+                width: 100%;
+                transition: background-color 0.2s;
+              "
+              onmouseover="this.style.backgroundColor='#2563eb'"
+              onmouseout="this.style.backgroundColor='#3b82f6'"
+            >
+              🗺️ Mapear Obra
+            </button>
+          </div>
         </div>
       `
 
@@ -317,64 +356,67 @@ export function MapaObras({ obras, onObraSelect }: MapaObrasProps) {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <MapPin className="h-5 w-5" />
-            Mapa das Obras - Maricá ({obras.length})
-          </div>
-          <Button onClick={toggleLayer} variant="outline" size="sm" className="flex items-center gap-2 bg-transparent">
-            <Layers className="h-4 w-4" />
-            {currentLayer === "street" ? "Satélite" : "Mapa"}
-          </Button>
-        </CardTitle>
-        <CardDescription>
-          Visualização geográfica das obras em Maricá, RJ -{" "}
-          {currentLayer === "street" ? "Vista de Rua" : "Vista de Satélite"}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-4">
-          {/* Legenda */}
-          <div className="flex flex-wrap gap-4 text-sm">
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-gray-500 border-2 border-white shadow-sm"></div>
-              <span>Planejada</span>
+              <MapPin className="h-5 w-5" />
+              Mapa das Obras - Maricá ({obras.length})
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-blue-500 border-2 border-white shadow-sm"></div>
-              <span>Em Andamento</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-yellow-500 border-2 border-white shadow-sm"></div>
-              <span>Pausada</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-white shadow-sm"></div>
-              <span>Concluída</span>
-            </div>
-          </div>
-
-          {/* Mapa */}
-          <div className="relative">
-            {isLoading && (
-              <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75 z-10 rounded-lg">
-                <div className="text-center">
-                  <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto" />
-                  <p className="mt-2 text-sm text-muted-foreground">Carregando mapa de Maricá...</p>
-                </div>
+            <Button onClick={toggleLayer} variant="outline" size="sm" className="flex items-center gap-2 bg-transparent">
+              <Layers className="h-4 w-4" />
+              {currentLayer === "street" ? "Satélite" : "Mapa"}
+            </Button>
+          </CardTitle>
+          <CardDescription>
+            Visualização geográfica das obras em Maricá, RJ -{" "}
+            {currentLayer === "street" ? "Vista de Rua" : "Vista de Satélite"}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {/* Legenda */}
+            <div className="flex flex-wrap gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-gray-500 border-2 border-white shadow-sm"></div>
+                <span>Planejada</span>
               </div>
-            )}
-            <div ref={mapRef} className="h-[500px] rounded-lg border" style={{ minHeight: "500px" }} />
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-blue-500 border-2 border-white shadow-sm"></div>
+                <span>Em Andamento</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-yellow-500 border-2 border-white shadow-sm"></div>
+                <span>Pausada</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-white shadow-sm"></div>
+                <span>Concluída</span>
+              </div>
+            </div>
 
-            {/* Indicador do modo atual */}
-            <div className="absolute top-2 right-2 bg-white/90 backdrop-blur-sm px-2 py-1 rounded text-xs font-medium shadow-sm z-[1000]">
-              {currentLayer === "street" ? "🗺️ Mapa" : "🛰️ Satélite"}
+            {/* Mapa */}
+            <div className="relative">
+              {isLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75 z-10 rounded-lg">
+                  <div className="text-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto" />
+                    <p className="mt-2 text-sm text-muted-foreground">Carregando mapa de Maricá...</p>
+                  </div>
+                </div>
+              )}
+              <div ref={mapRef} className="h-[500px] rounded-lg border" style={{ minHeight: "500px" }} />
+
+              {/* Indicador do modo atual */}
+              <div className="absolute top-2 right-2 bg-white/90 backdrop-blur-sm px-2 py-1 rounded text-xs font-medium shadow-sm z-[1000]">
+                {currentLayer === "street" ? "🗺️ Mapa" : "🛰️ Satélite"}
+              </div>
             </div>
           </div>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+
+    </>
   )
 }

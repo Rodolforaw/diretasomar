@@ -14,15 +14,40 @@ service cloud.firestore {
       allow create, update: if validateObraData();
     }
     
+    // Regras para a coleção de responsáveis técnicos
+    match /responsaveis_tecnicos/{responsavelId} {
+      // Permitir leitura e escrita para todos
+      allow read, write: if true;
+      
+      // Validação de dados na criação/atualização
+      allow create, update: if validateResponsavelData();
+    }
+    
     // Função para validar dados da obra
     function validateObraData() {
       let data = request.resource.data;
-      return data.keys().hasAll(['nome', 'endereco', 'latitude', 'longitude', 'status']) &&
-             data.nome is string &&
+      return data.keys().hasAll(['os', 'criticidade', 'tipo', 'descricaoServico', 'endereco', 'latitude', 'longitude', 'status', 'progresso']) &&
+             data.os is string &&
+             data.criticidade in ['Normal', 'Prioridade'] &&
+             data.tipo in ['Construção/Investimento', 'Reforma/Consumo'] &&
+             data.descricaoServico is string &&
              data.endereco is string &&
              data.latitude is number &&
              data.longitude is number &&
-             data.status in ['planejada', 'em_andamento', 'concluida', 'pausada'];
+             data.status in ['planejada', 'em_andamento', 'concluida', 'pausada'] &&
+             data.progresso is number &&
+             data.progresso >= 0 &&
+             data.progresso <= 100;
+    }
+    
+    // Função para validar dados do responsável técnico
+    function validateResponsavelData() {
+      let data = request.resource.data;
+      return data.keys().hasAll(['nome', 'email', 'telefone', 'especialidade']) &&
+             data.nome is string &&
+             data.email is string &&
+             data.telefone is string &&
+             data.especialidade is string;
     }
   }
 }

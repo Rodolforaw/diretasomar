@@ -42,6 +42,7 @@ export interface Obra {
   materiais: Material[]
   createdAt: Date | null
   updatedAt: Date | null
+  mapeamento?: any[] // Desenhos do mapa (polígonos, linhas, marcadores, etc)
 }
 
 export interface CreateObraData {
