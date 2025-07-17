@@ -2,24 +2,20 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { MapPin, Edit3, Square, Circle, MousePointer, Save, X, RotateCcw, ArrowLeft, Layers, Trash2 } from "lucide-react"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { MapPin, Edit3, Square, Circle, MousePointer, Save, X, RotateCcw, ArrowLeft, Layers, Trash2, Settings } from "lucide-react"
 import { obrasService } from "@/services/obras"
 import { useToast } from "@/hooks/use-toast"
 import type { Obra } from "@/types/obra"
 
-type DrawingMode = "select" | "polygon" | "rectangle" | "circle" | "marker" | "line"
-
 interface DrawingElement {
   id: string
-  type: DrawingMode
+  type: string
   coordinates: any
   color: string
   produto?: string
@@ -33,15 +29,17 @@ export default function MapeamentoPage() {
   
   const mapRef = useRef<HTMLDivElement>(null)
   const mapInstanceRef = useRef<any>(null)
-  const drawingLayerRef = useRef<any>(null)
+  const drawControlRef = useRef<any>(null)
+  const drawnItemsRef = useRef<any>(null)
   const [obra, setObra] = useState<Obra | null>(null)
-  const [currentMode, setCurrentMode] = useState<DrawingMode>("select")
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [drawings, setDrawings] = useState<DrawingElement[]>([])
   const [selectedDrawing, setSelectedDrawing] = useState<DrawingElement | null>(null)
+  const [showProductDialog, setShowProductDialog] = useState(false)
   const [produto, setProduto] = useState("")
   const [observacao, setObservacao] = useState("")
+  const [currentDrawingId, setCurrentDrawingId] = useState<string | null>(null)
 
   const obraId = params.obraId as string
 
@@ -79,7 +77,7 @@ export default function MapeamentoPage() {
     }
   }, [obraId, router, toast])
 
-  // Função para carregar Leaflet dinamicamente
+  // Função para carregar Leaflet e Leaflet.Draw dinamicamente
   const loadLeaflet = async () => {
     try {
       // Adicionar CSS do Leaflet apenas uma vez
@@ -92,8 +90,17 @@ export default function MapeamentoPage() {
         document.head.appendChild(link)
       }
 
-      // Importar Leaflet
+      // Adicionar CSS do Leaflet.Draw
+      if (!document.querySelector('link[href*="leaflet.draw"]')) {
+        const drawLink = document.createElement("link")
+        drawLink.rel = "stylesheet"
+        drawLink.href = "https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"
+        document.head.appendChild(drawLink)
+      }
+
+      // Importar Leaflet e Leaflet.Draw
       const L = await import("leaflet")
+      await import("leaflet-draw")
 
       // Configurar ícones padrão do Leaflet
       delete (L as any).Icon.Default.prototype._getIconUrl
@@ -153,8 +160,9 @@ export default function MapeamentoPage() {
         ).addTo(map)
 
         // Criar camada para desenhos
-        const drawingLayer = L.layerGroup().addTo(map)
-        drawingLayerRef.current = drawingLayer
+        const drawnItems = new L.FeatureGroup()
+        drawnItemsRef.current = drawnItems
+        map.addLayer(drawnItems)
 
         // Adicionar marcador da obra
         const obraMarker = L.marker(center, {
@@ -194,14 +202,105 @@ export default function MapeamentoPage() {
           </div>
         `)
 
+        // Configurar controles de desenho
+        const drawControl = new (L as any).Control.Draw({
+          draw: {
+            polygon: {
+              allowIntersection: false,
+              drawError: {
+                color: '#e1e100',
+                message: '<strong>Polígono inválido!</strong>'
+              },
+              shapeOptions: {
+                color: '#3B82F6',
+                fillColor: '#3B82F6',
+                fillOpacity: 0.3,
+                weight: 2
+              }
+            },
+            rectangle: {
+              shapeOptions: {
+                color: '#10B981',
+                fillColor: '#10B981',
+                fillOpacity: 0.3,
+                weight: 2
+              }
+            },
+            circle: {
+              shapeOptions: {
+                color: '#F59E0B',
+                fillColor: '#F59E0B',
+                fillOpacity: 0.3,
+                weight: 2
+              }
+            },
+            marker: {
+              icon: L.divIcon({
+                html: `
+                  <div style="
+                    background-color: #EF4444;
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 50%;
+                    border: 2px solid white;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                  "></div>
+                `,
+                className: "drawing-marker",
+                iconSize: [16, 16],
+                iconAnchor: [8, 8],
+              })
+            },
+            polyline: {
+              shapeOptions: {
+                color: '#8B5CF6',
+                weight: 3
+              }
+            }
+          },
+          edit: {
+            featureGroup: drawnItems,
+            remove: true
+          }
+        })
+
+        drawControlRef.current = drawControl
+        map.addControl(drawControl)
+
+        // Eventos de desenho
+        map.on('draw:created', (e: any) => {
+          const layer = e.layer
+          const type = e.layerType
+          const drawingId = Date.now().toString()
+          
+          // Adicionar dados customizados ao layer
+          layer.drawingId = drawingId
+          layer.drawingType = type
+          
+          drawnItems.addLayer(layer)
+          
+          // Abrir dialog para adicionar produto/observação
+          setCurrentDrawingId(drawingId)
+          setProduto("")
+          setObservacao("")
+          setShowProductDialog(true)
+        })
+
+        map.on('draw:edited', (e: any) => {
+          // Atualizar desenhos quando editados
+          updateDrawingsFromLayers()
+        })
+
+        map.on('draw:deleted', (e: any) => {
+          // Atualizar desenhos quando deletados
+          updateDrawingsFromLayers()
+        })
+
         mapInstanceRef.current = map
         setIsLoading(false)
 
-        // Configurar ferramentas de desenho
-        setupDrawingTools(L, map, drawingLayer)
-
         // Carregar desenhos existentes
-        loadExistingDrawings(L, drawingLayer)
+        loadExistingDrawings(L, drawnItems)
 
       } catch (err) {
         console.error("Erro ao inicializar mapa:", err)
@@ -223,9 +322,9 @@ export default function MapeamentoPage() {
     }
   }, [obra])
 
-  const loadExistingDrawings = (L: any, drawingLayer: any) => {
+  const loadExistingDrawings = (L: any, drawnItems: any) => {
     drawings.forEach((drawing) => {
-      const color = drawing.color || getColorForMode(drawing.type)
+      const color = drawing.color || getColorForType(drawing.type)
       
       switch (drawing.type) {
         case "polygon":
@@ -234,8 +333,12 @@ export default function MapeamentoPage() {
             fillColor: color,
             fillOpacity: 0.3,
             weight: 2
-          }).addTo(drawingLayer)
-          polygon.bindPopup(createDrawingPopup(drawing))
+          })
+          polygon.drawingId = drawing.id
+          polygon.drawingType = "polygon"
+          polygon.produto = drawing.produto
+          polygon.observacao = drawing.observacao
+          drawnItems.addLayer(polygon)
           break
           
         case "rectangle":
@@ -244,8 +347,12 @@ export default function MapeamentoPage() {
             fillColor: color,
             fillOpacity: 0.3,
             weight: 2
-          }).addTo(drawingLayer)
-          rectangle.bindPopup(createDrawingPopup(drawing))
+          })
+          rectangle.drawingId = drawing.id
+          rectangle.drawingType = "rectangle"
+          rectangle.produto = drawing.produto
+          rectangle.observacao = drawing.observacao
+          drawnItems.addLayer(rectangle)
           break
           
         case "circle":
@@ -255,8 +362,12 @@ export default function MapeamentoPage() {
             fillColor: color,
             fillOpacity: 0.3,
             weight: 2
-          }).addTo(drawingLayer)
-          circle.bindPopup(createDrawingPopup(drawing))
+          })
+          circle.drawingId = drawing.id
+          circle.drawingType = "circle"
+          circle.produto = drawing.produto
+          circle.observacao = drawing.observacao
+          drawnItems.addLayer(circle)
           break
           
         case "marker":
@@ -276,19 +387,116 @@ export default function MapeamentoPage() {
               iconSize: [16, 16],
               iconAnchor: [8, 8],
             })
-          }).addTo(drawingLayer)
-          marker.bindPopup(createDrawingPopup(drawing))
+          })
+          marker.drawingId = drawing.id
+          marker.drawingType = "marker"
+          marker.produto = drawing.produto
+          marker.observacao = drawing.observacao
+          drawnItems.addLayer(marker)
           break
           
-        case "line":
-          const line = L.polyline(drawing.coordinates, {
+        case "polyline":
+          const polyline = L.polyline(drawing.coordinates, {
             color,
             weight: 3
-          }).addTo(drawingLayer)
-          line.bindPopup(createDrawingPopup(drawing))
+          })
+          polyline.drawingId = drawing.id
+          polyline.drawingType = "polyline"
+          polyline.produto = drawing.produto
+          polyline.observacao = drawing.observacao
+          drawnItems.addLayer(polyline)
           break
       }
     })
+  }
+
+  const updateDrawingsFromLayers = () => {
+    if (!drawnItemsRef.current) return
+    
+    const layers = drawnItemsRef.current.getLayers()
+    const drawingsData = layers.map((layer: any) => {
+      const drawingId = layer.drawingId || Date.now().toString()
+      const type = layer.drawingType || getTypeFromLayer(layer)
+      const color = layer.options?.color || getColorForType(type)
+      
+      let coordinates
+      if (layer instanceof L.Polygon && !(layer instanceof L.Rectangle)) {
+        coordinates = layer.getLatLngs()[0].map((latlng: any) => [latlng.lat, latlng.lng])
+      } else if (layer instanceof L.Rectangle) {
+        coordinates = layer.getBounds()
+      } else if (layer instanceof L.Circle) {
+        coordinates = {
+          center: [layer.getLatLng().lat, layer.getLatLng().lng],
+          radius: layer.getRadius()
+        }
+      } else if (layer instanceof L.Marker) {
+        coordinates = [layer.getLatLng().lat, layer.getLatLng().lng]
+      } else if (layer instanceof L.Polyline) {
+        coordinates = layer.getLatLngs().map((latlng: any) => [latlng.lat, latlng.lng])
+      }
+
+      return {
+        id: drawingId,
+        type,
+        coordinates,
+        color,
+        produto: layer.produto,
+        observacao: layer.observacao
+      }
+    }).filter(Boolean)
+
+    setDrawings(drawingsData)
+  }
+
+  const getTypeFromLayer = (layer: any) => {
+    if (layer instanceof L.Polygon && !(layer instanceof L.Rectangle)) return "polygon"
+    if (layer instanceof L.Rectangle) return "rectangle"
+    if (layer instanceof L.Circle) return "circle"
+    if (layer instanceof L.Marker) return "marker"
+    if (layer instanceof L.Polyline) return "polyline"
+    return "unknown"
+  }
+
+  const getColorForType = (type: string) => {
+    const colors = {
+      polygon: "#3B82F6",
+      rectangle: "#10B981",
+      circle: "#F59E0B",
+      marker: "#EF4444",
+      polyline: "#8B5CF6",
+    }
+    return colors[type as keyof typeof colors] || "#6B7280"
+  }
+
+  const handleSaveProduct = () => {
+    if (!currentDrawingId || !drawnItemsRef.current) return
+
+    const layers = drawnItemsRef.current.getLayers()
+    const layer = layers.find((l: any) => l.drawingId === currentDrawingId)
+    
+    if (layer) {
+      layer.produto = produto
+      layer.observacao = observacao
+      
+      // Adicionar popup ao layer
+      const popupContent = createDrawingPopup({
+        id: currentDrawingId,
+        type: layer.drawingType,
+        coordinates: [],
+        color: layer.options?.color || "#6B7280",
+        produto,
+        observacao
+      })
+      
+      layer.bindPopup(popupContent)
+    }
+
+    setShowProductDialog(false)
+    setCurrentDrawingId(null)
+    setProduto("")
+    setObservacao("")
+    
+    updateDrawingsFromLayers()
   }
 
   const createDrawingPopup = (drawing: DrawingElement) => {
@@ -301,227 +509,30 @@ export default function MapeamentoPage() {
     `
   }
 
-  const setupDrawingTools = (L: any, map: any, drawingLayer: any) => {
-    let currentDrawing: any = null
-    let isDrawing = false
-
-    // Função para limpar desenhos
-    const clearDrawings = () => {
-      drawingLayer.clearLayers()
-      setDrawings([])
-      loadExistingDrawings(L, drawingLayer)
-    }
-
-    // Função para salvar desenhos
-    const saveDrawings = async () => {
-      const layers = drawingLayer.getLayers()
-      const drawingsData = layers.map((layer: any) => {
-        if (layer instanceof L.Polygon && !(layer instanceof L.Rectangle)) {
-          return {
-            type: "polygon",
-            coordinates: layer.getLatLngs()[0].map((latlng: any) => [latlng.lat, latlng.lng]),
-            color: layer.options.color,
-          }
-        } else if (layer instanceof L.Rectangle) {
-          return {
-            type: "rectangle",
-            coordinates: layer.getBounds(),
-            color: layer.options.color,
-          }
-        } else if (layer instanceof L.Circle) {
-          return {
-            type: "circle",
-            coordinates: {
-              center: [layer.getLatLng().lat, layer.getLatLng().lng],
-              radius: layer.getRadius()
-            },
-            color: layer.options.color,
-          }
-        } else if (layer instanceof L.Marker) {
-          return {
-            type: "marker",
-            coordinates: [layer.getLatLng().lat, layer.getLatLng().lng],
-            color: layer.options.color,
-          }
-        } else if (layer instanceof L.Polyline) {
-          return {
-            type: "line",
-            coordinates: layer.getLatLngs().map((latlng: any) => [latlng.lat, latlng.lng]),
-            color: layer.options.color,
-          }
-        }
-      }).filter(Boolean)
-
-      try {
-        if (obra) {
-          await obrasService.update(obra.id, { mapeamento: drawingsData })
-          toast({
-            title: "Mapeamento salvo!",
-            description: "Os desenhos foram salvos na obra."
-          })
-        }
-      } catch (error) {
+  const handleSaveDrawings = async () => {
+    updateDrawingsFromLayers()
+    
+    try {
+      if (obra) {
+        await obrasService.update(obra.id, { mapeamento: drawings })
         toast({
-          title: "Erro ao salvar mapeamento",
-          description: String(error),
-          variant: "destructive"
+          title: "Mapeamento salvo!",
+          description: "Os desenhos foram salvos na obra."
         })
       }
+    } catch (error) {
+      toast({
+        title: "Erro ao salvar mapeamento",
+        description: String(error),
+        variant: "destructive"
+      })
     }
-
-    // Configurar eventos do mapa baseado no modo
-    const handleMapClick = (e: any) => {
-      if (currentMode === "select") return
-
-      const color = getColorForMode(currentMode)
-      let newDrawing: any = null
-
-      switch (currentMode) {
-        case "marker":
-          newDrawing = L.marker(e.latlng, { color }).addTo(drawingLayer)
-          break
-        case "circle":
-          newDrawing = L.circle(e.latlng, { 
-            radius: 50, 
-            color,
-            fillColor: color,
-            fillOpacity: 0.3,
-            weight: 2
-          }).addTo(drawingLayer)
-          break
-        case "rectangle":
-          if (!isDrawing) {
-            isDrawing = true
-            const startPoint = e.latlng
-            newDrawing = L.rectangle([startPoint, startPoint], { 
-              color,
-              fillColor: color,
-              fillOpacity: 0.3,
-              weight: 2
-            }).addTo(drawingLayer)
-            currentDrawing = newDrawing
-            
-            const updateRectangle = (e: any) => {
-              if (currentDrawing) {
-                currentDrawing.setBounds([startPoint, e.latlng])
-              }
-            }
-            
-            const finishRectangle = () => {
-              isDrawing = false
-              currentDrawing = null
-              map.off('mousemove', updateRectangle)
-              map.off('click', finishRectangle)
-            }
-            
-            map.on('mousemove', updateRectangle)
-            map.on('click', finishRectangle)
-          }
-          break
-        case "polygon":
-          if (!isDrawing) {
-            isDrawing = true
-            const points: any[] = [e.latlng]
-            newDrawing = L.polygon(points, { 
-              color,
-              fillColor: color,
-              fillOpacity: 0.3,
-              weight: 2
-            }).addTo(drawingLayer)
-            currentDrawing = newDrawing
-            
-            const addPoint = (e: any) => {
-              points.push(e.latlng)
-              currentDrawing.setLatLngs(points)
-            }
-            
-            const finishPolygon = () => {
-              isDrawing = false
-              currentDrawing = null
-              map.off('click', addPoint)
-              map.off('dblclick', finishPolygon)
-            }
-            
-            map.on('click', addPoint)
-            map.on('dblclick', finishPolygon)
-          }
-          break
-        case "line":
-          if (!isDrawing) {
-            isDrawing = true
-            const points: any[] = [e.latlng]
-            newDrawing = L.polyline(points, { 
-              color,
-              weight: 3
-            }).addTo(drawingLayer)
-            currentDrawing = newDrawing
-            
-            const addPoint = (e: any) => {
-              points.push(e.latlng)
-              currentDrawing.setLatLngs(points)
-            }
-            
-            const finishLine = () => {
-              isDrawing = false
-              currentDrawing = null
-              map.off('click', addPoint)
-              map.off('dblclick', finishLine)
-            }
-            
-            map.on('click', addPoint)
-            map.on('dblclick', finishLine)
-          }
-          break
-      }
-
-      if (newDrawing && currentMode !== "rectangle" && currentMode !== "polygon" && currentMode !== "line") {
-        setDrawings(prev => [...prev, {
-          id: Date.now().toString(),
-          type: currentMode,
-          coordinates: newDrawing.getLatLng ? [newDrawing.getLatLng().lat, newDrawing.getLatLng().lng] : [],
-          color
-        }])
-      }
-    }
-
-    map.on('click', handleMapClick)
-
-    // Expor funções globais
-    // @ts-ignore
-    window.clearDrawings = clearDrawings
-    // @ts-ignore
-    window.saveDrawings = saveDrawings
-  }
-
-  const getColorForMode = (mode: DrawingMode) => {
-    const colors = {
-      select: "#6B7280",
-      polygon: "#3B82F6",
-      rectangle: "#10B981",
-      circle: "#F59E0B",
-      marker: "#EF4444",
-      line: "#8B5CF6",
-    }
-    return colors[mode] || "#6B7280"
-  }
-
-  const handleModeChange = (mode: DrawingMode) => {
-    setCurrentMode(mode)
   }
 
   const handleClearDrawings = () => {
-    // @ts-ignore
-    if (window.clearDrawings) {
-      // @ts-ignore
-      window.clearDrawings()
-    }
-  }
-
-  const handleSaveDrawings = () => {
-    // @ts-ignore
-    if (window.saveDrawings) {
-      // @ts-ignore
-      window.saveDrawings()
+    if (drawnItemsRef.current) {
+      drawnItemsRef.current.clearLayers()
+      setDrawings([])
     }
   }
 
@@ -560,189 +571,96 @@ export default function MapeamentoPage() {
         </div>
       </div>
 
-      <div className="flex h-[calc(100vh-80px)]">
-        {/* Sidebar com ferramentas */}
-        <div className="w-80 bg-white border-r p-6 overflow-y-auto">
-          <div className="space-y-6">
-            {/* Informações da obra */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg">Informações da Obra</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div>
-                  <Label className="text-sm font-medium">OS</Label>
-                  <p className="text-sm text-muted-foreground">{obra.os}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium">Endereço</Label>
-                  <p className="text-sm text-muted-foreground">{obra.endereco}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium">Descrição</Label>
-                  <p className="text-sm text-muted-foreground">{obra.descricaoServico}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium">Progresso</Label>
-                  <p className="text-sm text-muted-foreground">{obra.progresso}%</p>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Ferramentas de desenho */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg">Ferramentas de Desenho</CardTitle>
-                <CardDescription>Selecione uma ferramenta para desenhar no mapa</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <Button
-                  variant={currentMode === "select" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => handleModeChange("select")}
-                  className="w-full justify-start"
-                >
-                  <MousePointer className="h-4 w-4 mr-2" />
-                  Selecionar
-                </Button>
-                
-                <Button
-                  variant={currentMode === "marker" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => handleModeChange("marker")}
-                  className="w-full justify-start"
-                >
-                  <MapPin className="h-4 w-4 mr-2" />
-                  Marcador
-                </Button>
-                
-                <Button
-                  variant={currentMode === "polygon" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => handleModeChange("polygon")}
-                  className="w-full justify-start"
-                >
-                  <Edit3 className="h-4 w-4 mr-2" />
-                  Polígono
-                </Button>
-                
-                <Button
-                  variant={currentMode === "rectangle" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => handleModeChange("rectangle")}
-                  className="w-full justify-start"
-                >
-                  <Square className="h-4 w-4 mr-2" />
-                  Retângulo
-                </Button>
-                
-                <Button
-                  variant={currentMode === "circle" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => handleModeChange("circle")}
-                  className="w-full justify-start"
-                >
-                  <Circle className="h-4 w-4 mr-2" />
-                  Círculo
-                </Button>
-                
-                <Button
-                  variant={currentMode === "line" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => handleModeChange("line")}
-                  className="w-full justify-start"
-                >
-                  <Edit3 className="h-4 w-4 mr-2" />
-                  Linha
-                </Button>
-              </CardContent>
-            </Card>
-
-            {/* Produto e observações */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg">Produto/Observações</CardTitle>
-                <CardDescription>Adicione informações ao elemento selecionado</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div>
-                  <Label htmlFor="produto">Produto</Label>
-                  <Input
-                    id="produto"
-                    value={produto}
-                    onChange={(e) => setProduto(e.target.value)}
-                    placeholder="Ex: Cimento, Areia, Tijolo..."
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="observacao">Observação</Label>
-                  <Textarea
-                    id="observacao"
-                    value={observacao}
-                    onChange={(e) => setObservacao(e.target.value)}
-                    placeholder="Observações sobre o elemento..."
-                    rows={3}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Ações */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg">Ações</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <Button onClick={handleSaveDrawings} className="w-full">
-                  <Save className="h-4 w-4 mr-2" />
-                  Salvar Mapeamento
-                </Button>
-                
-                <Button variant="outline" onClick={handleClearDrawings} className="w-full">
-                  <RotateCcw className="h-4 w-4 mr-2" />
-                  Limpar Desenhos
-                </Button>
-              </CardContent>
-            </Card>
+      {/* Mapa em tela cheia */}
+      <div className="relative h-[calc(100vh-80px)]">
+        {isLoading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75 z-10">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+              <p className="mt-2 text-sm text-muted-foreground">Carregando mapa...</p>
+            </div>
+          </div>
+        )}
+        
+        {error && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75 z-10">
+            <div className="text-center">
+              <p className="text-red-600 mb-4">{error}</p>
+              <Button onClick={() => window.location.reload()} variant="outline">
+                Tentar Novamente
+              </Button>
+            </div>
+          </div>
+        )}
+        
+        <div ref={mapRef} className="w-full h-full" />
+        
+        {/* Barra de ferramentas flutuante */}
+        <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-3 py-2 rounded-lg shadow-lg z-[1000]">
+          <div className="flex items-center gap-2">
+            <Button onClick={handleSaveDrawings} size="sm" className="bg-green-600 hover:bg-green-700">
+              <Save className="h-4 w-4 mr-1" />
+              Salvar
+            </Button>
+            <Button onClick={handleClearDrawings} variant="outline" size="sm">
+              <RotateCcw className="h-4 w-4 mr-1" />
+              Limpar
+            </Button>
           </div>
         </div>
 
-        {/* Mapa */}
-        <div className="flex-1 relative">
-          {isLoading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75 z-10">
-              <div className="text-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
-                <p className="mt-2 text-sm text-muted-foreground">Carregando mapa...</p>
-              </div>
-            </div>
-          )}
-          
-          {error && (
-            <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75 z-10">
-              <div className="text-center">
-                <p className="text-red-600 mb-4">{error}</p>
-                <Button onClick={() => window.location.reload()} variant="outline">
-                  Tentar Novamente
-                </Button>
-              </div>
-            </div>
-          )}
-          
-          <div ref={mapRef} className="w-full h-full" />
-          
-          {/* Indicador do modo atual */}
-          <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-3 py-2 rounded-lg shadow-sm">
-            <div className="flex items-center gap-2">
-              <div 
-                className="w-3 h-3 rounded-full" 
-                style={{ backgroundColor: getColorForMode(currentMode) }}
-              ></div>
-              <span className="text-sm font-medium capitalize">{currentMode}</span>
-            </div>
+        {/* Informações da obra flutuante */}
+        <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm px-4 py-3 rounded-lg shadow-lg z-[1000] max-w-sm">
+          <h3 className="font-semibold text-sm mb-2">Informações da Obra</h3>
+          <div className="space-y-1 text-xs">
+            <p><strong>OS:</strong> {obra.os}</p>
+            <p><strong>Endereço:</strong> {obra.endereco}</p>
+            <p><strong>Progresso:</strong> {obra.progresso}%</p>
+            <p><strong>Status:</strong> {obra.status.replace("_", " ")}</p>
           </div>
         </div>
       </div>
+
+      {/* Dialog para adicionar produto/observação */}
+      <Dialog open={showProductDialog} onOpenChange={setShowProductDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Adicionar Informações ao Desenho</DialogTitle>
+            <DialogDescription>
+              Adicione produto e observações ao elemento desenhado
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="produto">Produto</Label>
+              <Input
+                id="produto"
+                value={produto}
+                onChange={(e) => setProduto(e.target.value)}
+                placeholder="Ex: Cimento, Areia, Tijolo..."
+              />
+            </div>
+            <div>
+              <Label htmlFor="observacao">Observação</Label>
+              <Textarea
+                id="observacao"
+                value={observacao}
+                onChange={(e) => setObservacao(e.target.value)}
+                placeholder="Observações sobre o elemento..."
+                rows={3}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowProductDialog(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleSaveProduct}>
+                Salvar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 } 
